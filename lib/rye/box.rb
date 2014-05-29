@@ -90,11 +90,11 @@ module Rye
     def exception_hook=(val); @rye_exception_hook = val; end
 
     # * +host+ The hostname to connect to. Default: localhost.
-    # * +user+ The username to connect as. Default: SSH config file or current shell user.
     # * +opts+ a hash of optional arguments.
     #
     # The +opts+ hash excepts the following keys:
     #
+    # * :user => the username to connect as. Default: SSH config file or current shell user.
     # * :safe => should Rye be safe? Default: true
     # * :port => remote server ssh port. Default: SSH config file or 22
     # * :keys => one or more private key file paths (passwordless login)
@@ -671,12 +671,7 @@ module Rye
       rescue Net::SSH::HostKeyMismatch => ex
         STDERR.puts ex.message
         print "\a" if @rye_info # Ring the bell
-        if highline.ask("Continue? ").strip.match(/\Ay|yes|sure|ya\z/i)
-          @rye_opts[:paranoid] = false
-          retry
-        else
-          raise Net::SSH::HostKeyMismatch
-        end
+        raise ex
       rescue Net::SSH::AuthenticationFailed => ex
         print "\a" if retried == 0 && @rye_info # Ring the bell once
         retried += 1
@@ -686,14 +681,14 @@ module Rye
         # Raise Net::SSH::AuthenticationFailed if publickey is the 
         # only auth method
         if @rye_opts[:auth_methods] == ["publickey"]
-          raise Net::SSH::AuthenticationFailed
+          raise ex
         elsif @rye_password_prompt && (STDIN.tty? && retried <= 3)
           STDERR.puts "Passwordless login failed for #{@rye_user}"
           @rye_opts[:password] = highline.ask("Password: ") { |q| q.echo = '' }.strip
           @rye_opts[:auth_methods].push *['keyboard-interactive', 'password']
           retry
         else
-          raise Net::SSH::AuthenticationFailed
+          raise ex
         end
       end
       
@@ -1074,7 +1069,7 @@ module Rye
         }
         channel.on_data                   { |ch, data| 
           channel[:handler] = ":on_data"
-          @rye_stdout_hook.call(data) if !@rye_pty && !@rye_quiet && @rye_stdout_hook.kind_of?(Proc)
+          @rye_stdout_hook.call(data, user, host, nickname) if !@rye_pty && !@rye_quiet && @rye_stdout_hook.kind_of?(Proc)
           if rye_pty && data =~ /password/i
             channel[:prompt] = data
             channel[:state] = :await_input
